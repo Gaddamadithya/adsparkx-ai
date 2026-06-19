@@ -28,7 +28,7 @@ def run_tests():
     # Reset and ingest to ensure a clean state
     rag.reset_database()
     indexed_count = rag.ingest_directory("data")
-    print(f"  - Successfully indexed {indexed_count} total chunks in ChromaDB.")
+    print(f"  - Successfully indexed {indexed_count} total chunks in FAISS.")
     
     # 5 test queries matching requirements
     test_scenarios = [

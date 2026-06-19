@@ -1,6 +1,8 @@
 import os
+import json
+import numpy as np
+import faiss
 from google import genai
-import chromadb
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 from src import config
@@ -8,30 +10,51 @@ from src import config
 class LocalRAGPipeline:
     def __init__(self, db_dir=None):
         self.db_dir = db_dir or config.CHROMA_DB_DIR
-        self.api_key = config.GEMINI_API_KEY
+        os.makedirs(self.db_dir, exist_ok=True)
         
-        # Initialize Gemini Client if key exists
+        self.index_path = os.path.join(self.db_dir, "faiss.index")
+        self.metadata_path = os.path.join(self.db_dir, "metadata.json")
+        
+        self.api_key = config.GEMINI_API_KEY
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
         else:
             self.client = None
             
-        self.chroma_client = chromadb.PersistentClient(path=self.db_dir)
-        # Using cosine distance metric
-        self.collection = self.chroma_client.get_or_create_collection(
-            name="support_kb",
-            metadata={"hnsw:space": "cosine"}
-        )
+        self.dimension = 768
+        
+        # Load or initialize FAISS index
+        if os.path.exists(self.index_path) and os.path.exists(self.metadata_path):
+            try:
+                self.index = faiss.read_index(self.index_path)
+                with open(self.metadata_path, "r", encoding="utf-8") as f:
+                    self.metadata = json.load(f)
+            except Exception as e:
+                print(f"Error loading FAISS database: {e}. Reinitializing.")
+                self._reinitialize_db()
+        else:
+            self._reinitialize_db()
+
+    def _reinitialize_db(self):
+        # IndexFlatIP uses Inner Product. When vectors are L2-normalized, IP is mathematically equivalent to Cosine Similarity.
+        self.index = faiss.IndexFlatIP(self.dimension)
+        self.metadata = []
+
+    def get_total_chunks(self) -> int:
+        """Returns the total number of indexed chunks."""
+        return self.index.ntotal
 
     def get_embedding(self, text: str) -> list:
         """Call Gemini Embedding model text-embedding-004."""
         if not self.client:
-            # Return a mock vector of 768 dimensions for fallback/offline testing
+            # Return a mock normalized vector of 768 dimensions for fallback/offline testing
             import math
             mock_vec = []
-            for i in range(768):
+            for i in range(self.dimension):
                 mock_vec.append(math.sin(i + len(text)) * 0.05)
-            return mock_vec
+            vec = np.array(mock_vec, dtype="float32")
+            faiss.normalize_L2(vec.reshape(1, -1))
+            return vec.tolist()
 
         response = self.client.models.embed_content(
             model=config.EMBEDDING_MODEL,
@@ -53,7 +76,7 @@ class LocalRAGPipeline:
         return pages_content
 
     def ingest_directory(self, data_dir="data"):
-        """Scans the data directory, parses all TXT, MD, and PDF files, and indexes them."""
+        """Scans the data directory, parses all TXT, MD, and PDF files, and indexes them in FAISS."""
         if not os.path.exists(data_dir):
             os.makedirs(data_dir, exist_ok=True)
             return 0
@@ -65,8 +88,6 @@ class LocalRAGPipeline:
         ]
         
         total_chunks = 0
-        
-        # Splitter config
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=config.CHUNK_SIZE, 
             chunk_overlap=config.CHUNK_OVERLAP
@@ -77,7 +98,6 @@ class LocalRAGPipeline:
             doc_name = filename
             
             if filename.endswith('.pdf'):
-                # Handle PDF files page by page to capture metadata
                 pages_data = self.parse_pdf(file_path)
                 for page_data in pages_data:
                     page_text = page_data["text"]
@@ -86,80 +106,91 @@ class LocalRAGPipeline:
                     chunks = splitter.split_text(page_text)
                     for chunk_idx, chunk in enumerate(chunks):
                         embedding = self.get_embedding(chunk)
-                        chunk_id = f"{doc_name}_p{page_num}_c{chunk_idx}"
                         
-                        self.collection.add(
-                            ids=[chunk_id],
-                            embeddings=[embedding],
-                            metadatas=[{
-                                "source": doc_name, 
-                                "chunk_index": chunk_idx,
-                                "page": str(page_num)
-                            }],
-                            documents=[chunk]
-                        )
+                        # Add to FAISS index
+                        vector = np.array(embedding, dtype="float32").reshape(1, -1)
+                        faiss.normalize_L2(vector)
+                        self.index.add(vector)
+                        
+                        self.metadata.append({
+                            "id": f"{doc_name}_p{page_num}_c{chunk_idx}",
+                            "source": doc_name,
+                            "chunk_index": chunk_idx,
+                            "page": str(page_num),
+                            "text": chunk
+                        })
                         total_chunks += 1
             else:
-                # Handle TXT and MD files
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
                 
                 chunks = splitter.split_text(content)
                 for chunk_idx, chunk in enumerate(chunks):
                     embedding = self.get_embedding(chunk)
-                    chunk_id = f"{doc_name}_c{chunk_idx}"
                     
-                    self.collection.add(
-                        ids=[chunk_id],
-                        embeddings=[embedding],
-                        metadatas=[{
-                            "source": doc_name, 
-                            "chunk_index": chunk_idx,
-                            "page": "N/A"
-                        }],
-                        documents=[chunk]
-                    )
+                    # Add to FAISS index
+                    vector = np.array(embedding, dtype="float32").reshape(1, -1)
+                    faiss.normalize_L2(vector)
+                    self.index.add(vector)
+                    
+                    self.metadata.append({
+                        "id": f"{doc_name}_c{chunk_idx}",
+                        "source": doc_name,
+                        "chunk_index": chunk_idx,
+                        "page": "N/A",
+                        "text": chunk
+                    })
                     total_chunks += 1
                     
+        # Write to disk
+        self.save_database()
         return total_chunks
 
+    def save_database(self):
+        """Saves FAISS index and metadata to disk."""
+        faiss.write_index(self.index, self.index_path)
+        with open(self.metadata_path, "w", encoding="utf-8") as f:
+            json.dump(self.metadata, f, indent=4)
+
     def reset_database(self):
-        """Clears all entries in the support_kb vector store collection."""
-        try:
-            self.chroma_client.delete_collection("support_kb")
-        except Exception:
-            pass
-        self.collection = self.chroma_client.get_or_create_collection(
-            name="support_kb",
-            metadata={"hnsw:space": "cosine"}
-        )
+        """Clears all entries in the FAISS vector database and resets local index files."""
+        self._reinitialize_db()
+        if os.path.exists(self.index_path):
+            try:
+                os.remove(self.index_path)
+            except Exception:
+                pass
+        if os.path.exists(self.metadata_path):
+            try:
+                os.remove(self.metadata_path)
+            except Exception:
+                pass
 
     def retrieve_context(self, query: str, top_k: int = 3) -> list:
-        """Retrieves top-k relevant document chunks for the query, calculating confidence scores."""
-        query_vector = self.get_embedding(query)
-        
-        # Verify collection size
-        if self.collection.count() == 0:
+        """Retrieves top-k relevant document chunks for the query from the FAISS database."""
+        if self.index.ntotal == 0:
             return []
-
-        results = self.collection.query(
-            query_embeddings=[query_vector],
-            n_results=top_k
-        )
-
+            
+        query_vector = self.get_embedding(query)
+        q_vec = np.array(query_vector, dtype="float32").reshape(1, -1)
+        faiss.normalize_L2(q_vec)
+        
+        # Search index
+        scores, indices = self.index.search(q_vec, top_k)
+        
         retrieved_items = []
-        if results and results['documents'] and results['documents'][0]:
-            for i in range(len(results['documents'][0])):
-                # Distance represents cosine distance in Chroma when space=cosine.
-                # Cosine Distance = 1.0 - Cosine Similarity
-                # So Similarity Score = 1.0 - Cosine Distance
-                distance = results['distances'][0][i] if results['distances'] else 0.0
-                score = 1.0 - distance
-                
-                retrieved_items.append({
-                    "text": results['documents'][0][i],
-                    "source": results['metadatas'][0][i]['source'],
-                    "page": results['metadatas'][0][i].get('page', 'N/A'),
-                    "score": round(max(0.0, min(1.0, score)), 4)
-                })
+        for score, idx in zip(scores[0], indices[0]):
+            if idx == -1 or idx >= len(self.metadata):
+                continue
+            meta = self.metadata[idx]
+            
+            # The score from IndexFlatIP with normalized vectors is exactly Cosine Similarity
+            similarity_score = float(score)
+            
+            retrieved_items.append({
+                "text": meta["text"],
+                "source": meta["source"],
+                "page": meta["page"],
+                "score": round(max(0.0, min(1.0, similarity_score)), 4)
+            })
         return retrieved_items

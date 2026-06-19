@@ -189,7 +189,7 @@ if "rag" not in st.session_state:
     st.session_state.rag = LocalRAGPipeline()
     # Auto-ingest files on startup if DB count is 0
     try:
-        if st.session_state.rag.collection.count() == 0:
+        if st.session_state.rag.get_total_chunks() == 0:
             st.session_state.rag.ingest_directory("data")
     except Exception:
         pass
@@ -251,7 +251,7 @@ with st.sidebar:
     
     st.markdown("### 📊 Database & Index Control")
     try:
-        total_docs = st.session_state.rag.collection.count()
+        total_docs = st.session_state.rag.get_total_chunks()
     except Exception:
         total_docs = 0
     st.metric("Total Indexed Chunks", total_docs)
