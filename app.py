@@ -1,5 +1,8 @@
-import streamlit as st
 import os
+# Force protobuf to use the python implementation to bypass opentelemetry/protobuf conflicts on Streamlit Cloud
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
+import streamlit as st
 import json
 import time
 from src import config
