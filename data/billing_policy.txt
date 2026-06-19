@@ -1,0 +1,22 @@
+Adsparkx Billing Policy and Cycle Guide
+
+This document outlines our standard billing cycles, retry schedules, payment methods, and account grace periods.
+
+1. Billing Cycle
+Adsparkx subscriptions are billed automatically in advance on a recurring monthly or annual basis. 
+Your billing date is established on the day you subscribe to a paid tier. For instance, if you upgrade to a Pro tier on the 14th of the month, your subsequent billing dates will fall on the 14th of each following month.
+
+2. Failed Payments and Retry Schedule
+If a charge fails due to card expiration, insufficient funds, or system issues, we execute a retry schedule:
+- First Retry: 3 days after the initial payment failure.
+- Second Retry: 6 days after the initial failure.
+- Third Retry: 9 days after the initial failure.
+
+During this period, your account will enter a "Billing Grace Period".
+
+3. Grace Period
+We offer a 14-day grace period during which your account remains active and features are not locked.
+If the outstanding balance is not settled within 14 days, your account is automatically downgraded to the Free tier, and usage limits are restricted immediately.
+
+4. Billing Invoices
+Invoices are sent to the billing email address configured on your account. You can download PDF invoices from the dashboard: Settings -> Billing & Invoices -> Billing History.

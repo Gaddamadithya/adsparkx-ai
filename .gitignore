@@ -1,0 +1,22 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Local Vector Database
+chroma_db/
+
+# Secrets and Local Configurations
+.env
+.env.local
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# IDE settings
+.vscode/
+.idea/

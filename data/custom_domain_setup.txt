@@ -1,0 +1,21 @@
+Adsparkx Custom Domain Configuration Guide
+
+This article outlines how to link a custom domain to your Adsparkx Developer Portal (available on Pro and Enterprise plans).
+
+1. Add Domain in Dashboard
+1. Go to Settings -> Portal settings.
+2. Under "Custom Domain", input your domain or subdomain (e.g., portal.yourdomain.com).
+3. Copy the "CNAME Target Value" provided (usually: proxy.adsparkx.com).
+
+2. Configure DNS Settings
+Log in to your DNS provider (e.g., GoDaddy, Cloudflare, Namecheap) and create a CNAME record:
+- Type: CNAME
+- Host/Name: portal (or your chosen subdomain)
+- Target/Value: proxy.adsparkx.com
+- TTL: Automatic or 1 Hour
+
+If you want to configure a root apex domain (e.g., yourdomain.com), create an ALIAS or ANAME record pointing to proxy.adsparkx.com.
+
+3. SSL Verification & Provisioning
+Once the DNS record is updated, our system automatically provisions a Let's Encrypt SSL certificate for your domain. 
+Note: DNS propagation can take between 5 minutes and 24 hours. You can track propagation status in the dashboard. If SSL certificate fails to provision, check that no CAA DNS records are blocking Let's Encrypt.
